@@ -657,7 +657,21 @@ export class SwaggerDocGenerator {
 
     // Create a unique interface name based on the operation ID
     const operationId = endpointInfo.operationId || this.generateOperationId(path, method);
-    const interfaceName = `${toPascalCase(operationId)}Params`;
+
+    // Extract action name from operationId to create cleaner parameter interface names
+    // e.g. configController_updateConfig -> UpdateConfigParams instead of ConfigController_updateConfigParams
+    let interfaceName: string;
+    if (operationId.includes('_')) {
+      const parts = operationId.split('_');
+      if (parts.length >= 2) {
+        // Use just the action part in the interface name
+        interfaceName = `${toPascalCase(parts[parts.length - 1])}Params`;
+      } else {
+        interfaceName = `${toPascalCase(operationId)}Params`;
+      }
+    } else {
+      interfaceName = `${toPascalCase(operationId)}Params`;
+    }
 
     let paramsInterface = `export interface ${interfaceName} {\n`;
 
@@ -684,7 +698,23 @@ export class SwaggerDocGenerator {
    */
   generateReactQueryHook(path: string, method: string, endpointInfo: any, schemas: { [key: string]: any }): string {
     const operationId = endpointInfo.operationId || this.generateOperationId(path, method);
-    const hookName = `use${toPascalCase(operationId)}`;
+
+    // Extract action name from operationId to create cleaner hook names
+    // e.g. configController_updateConfig -> useUpdateConfig instead of useConfigController_updateConfig
+    let hookName = `use${toPascalCase(operationId)}`;
+
+    // Check if operationId follows pattern controller_action and simplify to action
+    if (operationId.includes('_')) {
+      const parts = operationId.split('_');
+      if (parts.length >= 2) {
+        // Use just the action part as the hook name
+        hookName = `use${toPascalCase(parts[parts.length - 1])}`;
+      }
+    } else {
+      // For operationIds without underscores, keep the original naming
+      hookName = `use${toPascalCase(operationId)}`;
+    }
+
     const hookType = method.toLowerCase() === 'get' ? 'useQuery' : 'useMutation';
 
     // Use unique parameter interface name
@@ -711,9 +741,9 @@ export class SwaggerDocGenerator {
       }
     }
 
-    // Format the path for use in the code (handle path parameters)
-    const pathWithParams = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
-    const axiosPath = `\`\${process.env.REACT_APP_API_BASE_URL || ''}${pathWithParams}\``;
+    // Format the path for use in the code (handle path parameters) - without base URL
+    const formattedPath = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
+    const axiosPath = `\`${formattedPath}\``;
 
     // Generate the hook code
     let hookCode = '';
@@ -722,7 +752,8 @@ export class SwaggerDocGenerator {
       // For GET requests, use useQuery
       const hasParams = pathParams.length > 0 || queryParams.length > 0;
       if (hasParams) {
-        const paramInterfaceName = `${toPascalCase(operationId)}Params`;
+        // Generate simpler parameter interface name based on hook name instead of operationId
+        const paramInterfaceName = `${hookName.replace('use', '')}Params`;
         hookCode += `export const ${hookName} = (params: ${paramInterfaceName}) => {\n`;
         hookCode += `  return useQuery({\n`;
         hookCode += `    queryKey: ['${operationId}', params],\n`;
@@ -747,15 +778,13 @@ export class SwaggerDocGenerator {
       // For non-GET requests, use useMutation
       const hasPathParams = pathParams.length > 0;
       if (hasPathParams) {
-        const paramInterfaceName = `${toPascalCase(operationId)}Params`;
+        // Generate simpler parameter interface name based on hook name instead of operationId
+        const paramInterfaceName = `${hookName.replace('use', '')}Params`;
         hookCode += `export const ${hookName} = () => {\n`;
         hookCode += `  const queryClient = useQueryClient();\n\n`;
         hookCode += `  return useMutation({\n`;
         hookCode += `    mutationFn: async ({ params, data }: { params: ${paramInterfaceName}; data: ${requestBodyType} }) => {\n`;
-        // Format the path for use in the code (handle path parameters)
-        let formattedPath = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
-        const pathWithParams = `\`\${process.env.REACT_APP_API_BASE_URL || ''}${formattedPath}\``;
-        hookCode += `      const response = await axios.${method.toLowerCase()}<${responseType}>(${pathWithParams}, data);\n`;
+        hookCode += `      const response = await axios.${method.toLowerCase()}<${responseType}>(${axiosPath}, data);\n`;
         hookCode += `      return response.data;\n`;
         hookCode += `    },\n`;
         hookCode += `    onSuccess: () => {\n`;
