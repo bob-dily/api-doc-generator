@@ -24,10 +24,10 @@ The tool can be used from the command line to generate documentation, TypeScript
 
 #### Generate Documentation (Default)
 ```bash
-# Generate documentation from a URL
+# Generate documentation from a URL (output to ./generated/docs/api-documentation.md by default)
 swagger-doc-generator --url https://petstore.swagger.io/v2/swagger.json
 
-# Generate documentation from a local file
+# Generate documentation from a local file (output to ./generated/docs/api-documentation.md by default)
 swagger-doc-generator --input ./swagger.json
 
 # Generate documentation and specify output file
@@ -36,7 +36,7 @@ swagger-doc-generator --url https://petstore.swagger.io/v2/swagger.json --output
 
 #### Generate TypeScript Types
 ```bash
-# Generate TypeScript types from a local file
+# Generate TypeScript types from a local file (output to ./generated/types/ by default)
 swagger-doc-generator --input ./swagger.json --generate-types
 
 # Generate TypeScript types with custom output directory
@@ -45,15 +45,22 @@ swagger-doc-generator --input ./swagger.json --generate-types --types-output ./s
 
 #### Generate React Hooks
 ```bash
-# Generate React hooks from a local file
+# Generate React hooks from a local file (output to ./generated/hooks/ by default)
 swagger-doc-generator --input ./swagger.json --generate-hooks
 
 # Generate React hooks with custom output directory
 swagger-doc-generator --input ./swagger.json --generate-hooks --hooks-output ./src/hooks
 
-# Generate both types and hooks
+# Generate both types and hooks (output to ./generated/ directories by default)
 swagger-doc-generator --input ./swagger.json --generate-types --generate-hooks
 ```
+
+#### Default Output Location
+By default, all generated content is placed in the `./generated` directory to keep your project clean and separate generated content from source code:
+
+- Documentation: `./generated/docs/api-documentation.md`
+- TypeScript types: `./generated/types/`
+- React hooks: `./generated/hooks/`
 
 ### Programmatic Usage
 

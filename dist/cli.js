@@ -55,9 +55,9 @@ const argv = (0, yargs_1.default)((0, helpers_1.hideBin)(process.argv))
 })
     .option('output', {
     alias: 'o',
-    describe: 'Output path for the generated documentation (default: ./docs/api-documentation.md)',
+    describe: 'Output path for the generated documentation (default: ./generated/docs/api-documentation.md)',
     type: 'string',
-    default: './docs/api-documentation.md'
+    default: './generated/docs/api-documentation.md'
 })
     .option('generate-types', {
     describe: 'Generate TypeScript type definitions',
@@ -70,14 +70,14 @@ const argv = (0, yargs_1.default)((0, helpers_1.hideBin)(process.argv))
     default: false
 })
     .option('types-output', {
-    describe: 'Output directory for TypeScript types (default: ./types)',
+    describe: 'Output directory for TypeScript types (default: ./generated/types)',
     type: 'string',
-    default: './types'
+    default: './generated/types'
 })
     .option('hooks-output', {
-    describe: 'Output directory for React hooks (default: ./hooks)',
+    describe: 'Output directory for React hooks (default: ./generated/hooks)',
     type: 'string',
-    default: './hooks'
+    default: './generated/hooks'
 })
     .check((argv) => {
     if (!argv.url && !argv.input) {
@@ -92,6 +92,12 @@ const argv = (0, yargs_1.default)((0, helpers_1.hideBin)(process.argv))
     .parseSync();
 async function run() {
     try {
+        // Create the generated directory if it doesn't exist
+        const generatedDir = './generated';
+        if (!fs.existsSync(generatedDir)) {
+            fs.mkdirSync(generatedDir, { recursive: true });
+            console.log(`Created directory: ${generatedDir}`);
+        }
         const generator = new index_1.SwaggerDocGenerator();
         let swaggerDoc;
         if (argv.url) {
