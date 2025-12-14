@@ -1,6 +1,6 @@
 {
   "name": "jszy-swagger-doc-generator",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "A tool to generate frontend documentation from Swagger/OpenAPI JSON files",
   "main": "dist/index.js",
   "bin": {
