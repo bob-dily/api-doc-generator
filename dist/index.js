@@ -333,8 +333,35 @@ class SwaggerDocGenerator {
             let hooksContent = `// ${toPascalCase(tag)} API Hooks\n`;
             hooksContent += `import { useQuery, useMutation, useQueryClient } from 'react-query';\n`;
             hooksContent += `import axios from 'axios';\n`;
-            hooksContent += `// Import types\n`;
-            hooksContent += `import type { ${Object.keys(schemas).join(', ')} } from './${toCamelCase(tag)}.types';\n\n`;
+            // Determine which types are actually used in this tag's endpoints and generate imports
+            const usedTypeNames = new Set();
+            // First, find all types that are directly used in endpoints for this tag
+            if (schemas) {
+                for (const [typeName, schema] of Object.entries(schemas)) {
+                    if (this.isSchemaUsedInEndpoints(typeName, endpoints, schemas)) {
+                        usedTypeNames.add(typeName);
+                    }
+                }
+            }
+            // Then, add all transitive dependencies of the directly used types
+            const finalTypeNames = new Set();
+            for (const typeName of usedTypeNames) {
+                finalTypeNames.add(typeName);
+                // Find all types referenced by this type
+                const referencedTypes = this.findSchemaReferences(schemas[typeName], schemas);
+                for (const refName of referencedTypes) {
+                    if (schemas[refName]) {
+                        finalTypeNames.add(refName);
+                    }
+                }
+            }
+            // Add import statement only if there are types to import
+            if (finalTypeNames.size > 0) {
+                hooksContent += `import type { ${Array.from(finalTypeNames).join(', ')} } from './${toCamelCase(tag)}.types';\n\n`;
+            }
+            else {
+                hooksContent += `\n`;
+            }
             // Generate parameter interfaces for this tag
             const allParamInterfaces = [];
             endpoints.forEach(({ path, method, endpointInfo }) => {
@@ -654,6 +681,59 @@ class SwaggerDocGenerator {
         return `${method.toLowerCase()}_${path.replace(/[\/{}]/g, '_')}`;
     }
     /**
+     * Formats code using Prettier - sync version with child process
+     */
+    formatCode(code, filepath) {
+        // Skip formatting in test environment to avoid ESM issues
+        if (process.env.NODE_ENV === 'test' || typeof jest !== 'undefined') {
+            return code;
+        }
+        try {
+            // Use execSync to run prettier as a separate process to avoid ESM issues
+            const { execSync } = require('child_process');
+            const { writeFileSync, readFileSync, unlinkSync } = require('fs');
+            const { join, extname } = require('path');
+            const { tmpdir } = require('os');
+            // Determine the file extension to use for the temp file
+            const fileExtension = extname(filepath) || '.txt';
+            const tempPath = join(tmpdir(), `prettier-tmp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}${fileExtension}`);
+            writeFileSync(tempPath, code, 'utf8');
+            // Format the file using prettier CLI
+            execSync(`npx prettier --write "${tempPath}" --single-quote --trailing-comma es5 --tab-width 2 --semi --print-width 80`, {
+                stdio: 'pipe'
+            });
+            // Read the formatted content back
+            const formattedCode = readFileSync(tempPath, 'utf8');
+            // Clean up the temporary file
+            unlinkSync(tempPath);
+            return formattedCode;
+        }
+        catch (error) {
+            console.warn(`Failed to format ${filepath} with Prettier:`, error);
+            return code; // Return unformatted code if formatting fails
+        }
+    }
+    /**
+     * Gets the parser based on file extension
+     */
+    getParserForFile(filepath) {
+        const ext = path.extname(filepath);
+        switch (ext) {
+            case '.ts':
+            case '.tsx':
+                return 'typescript';
+            case '.js':
+            case '.jsx':
+                return 'babel';
+            case '.json':
+                return 'json';
+            case '.md':
+                return 'markdown';
+            default:
+                return 'typescript';
+        }
+    }
+    /**
      * Saves the generated documentation to a file
      */
     saveDocumentationToFile(documentation, outputPath) {
@@ -661,7 +741,8 @@ class SwaggerDocGenerator {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        fs.writeFileSync(outputPath, documentation, 'utf8');
+        const formattedDocumentation = this.formatCode(documentation, outputPath);
+        fs.writeFileSync(outputPath, formattedDocumentation, 'utf8');
     }
     /**
      * Saves the generated TypeScript types to a file
@@ -671,7 +752,8 @@ class SwaggerDocGenerator {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        fs.writeFileSync(outputPath, types, 'utf8');
+        const formattedTypes = this.formatCode(types, outputPath);
+        fs.writeFileSync(outputPath, formattedTypes, 'utf8');
     }
     /**
      * Saves the generated React hooks to files organized by tag
@@ -688,11 +770,13 @@ class SwaggerDocGenerator {
             }
             // Save hooks to hooks file
             const hooksFileName = path.join(tagDir, `${toCamelCase(tag)}.hooks.ts`);
-            fs.writeFileSync(hooksFileName, hooks, 'utf8');
+            const formattedHooks = this.formatCode(hooks, hooksFileName);
+            fs.writeFileSync(hooksFileName, formattedHooks, 'utf8');
             // Save types to types file
             if (types.trim()) { // Only save if there are types
                 const typesFileName = path.join(tagDir, `${toCamelCase(tag)}.types.ts`);
-                fs.writeFileSync(typesFileName, types, 'utf8');
+                const formattedTypes = this.formatCode(types, typesFileName);
+                fs.writeFileSync(typesFileName, formattedTypes, 'utf8');
             }
         }
     }

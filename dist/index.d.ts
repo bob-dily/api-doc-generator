@@ -144,6 +144,14 @@ export declare class SwaggerDocGenerator {
      */
     generateOperationId(path: string, method: string): string;
     /**
+     * Formats code using Prettier - sync version with child process
+     */
+    private formatCode;
+    /**
+     * Gets the parser based on file extension
+     */
+    private getParserForFile;
+    /**
      * Saves the generated documentation to a file
      */
     saveDocumentationToFile(documentation: string, outputPath: string): void;
