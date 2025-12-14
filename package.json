@@ -4,7 +4,9 @@
   "description": "A tool to generate frontend documentation from Swagger/OpenAPI JSON files",
   "main": "dist/index.js",
   "bin": {
-    "swagger-doc-generator": "./dist/cli.js"
+    "swagger-doc-generator": "./dist/cli.js",
+    "jszy-swagger-doc-generator": "./dist/cli.js",
+    "api-sdk": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",

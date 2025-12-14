@@ -1,6 +1,8 @@
-# jszy-swagger-doc-generator
+# jszy-swagger-doc-generator (api-sdk)
 
 A tool to generate frontend documentation, TypeScript types, and React Hooks from Swagger/OpenAPI JSON files.
+
+Available command aliases: `api-sdk`, `jszy-swagger-doc-generator`, `swagger-doc-generator`
 
 ## Features
 
@@ -34,9 +36,13 @@ npx jszy-swagger-doc-generator
 ### Example 1: Generate docs from a local Swagger JSON file
 
 1. First, make sure you have a swagger.json file in your project
-2. Run the command:
+2. Run the command using the primary alias:
 ```bash
-jszy-swagger-doc-generator --input ./swagger.json
+api-sdk --input ./swagger.json
+```
+Alternatively, you can use the full package name:
+```bash
+npx jszy-swagger-doc-generator --input ./swagger.json
 ```
 3. Check the generated documentation in `./generated/docs/api-documentation.md`
 
@@ -44,7 +50,7 @@ jszy-swagger-doc-generator --input ./swagger.json
 
 1. If your API is running and exposes Swagger JSON at `http://localhost:3000/api-docs-json`:
 ```bash
-jszy-swagger-doc-generator --url http://localhost:3000/api-docs-json
+api-sdk --url http://localhost:3000/api-docs-json
 ```
 2. All content will be generated in the `./generated` directory by default
 
@@ -52,7 +58,7 @@ jszy-swagger-doc-generator --url http://localhost:3000/api-docs-json
 
 1. To generate TypeScript types and React hooks from your Swagger file:
 ```bash
-jszy-swagger-doc-generator --input ./swagger.json --generate-types --generate-hooks
+api-sdk --input ./swagger.json --generate-types --generate-hooks
 ```
 2. Generated files will be in:
    - TypeScript types: `./generated/types/`
@@ -62,11 +68,14 @@ jszy-swagger-doc-generator --input ./swagger.json --generate-types --generate-ho
 
 1. Generate all documentation, types, and hooks from a live API:
 ```bash
-jszy-swagger-doc-generator --url http://localhost:3000/api-docs-json --generate-types --generate-hooks
+api-sdk --url http://localhost:3000/api-docs-json --generate-types --generate-hooks
 ```
 2. This will create all outputs in the `./generated` directory
 
 ## CLI Options
+
+The tool provides multiple command aliases: `api-sdk`, `jszy-swagger-doc-generator`, and `swagger-doc-generator`.
+All commands support the same options:
 
 - `--url, -u`: URL to the Swagger JSON file
 - `--input, -i`: Path to the local Swagger JSON file
