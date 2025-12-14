@@ -93,13 +93,40 @@ export declare class SwaggerDocGenerator {
         [key: string]: any;
     }): string;
     /**
-     * Generates React hooks from the paths in Swagger doc
+     * Generates React hooks from the paths in Swagger doc organized by tag
      */
-    generateReactHooks(swaggerDoc: SwaggerDoc): Map<string, string>;
+    generateReactHooks(swaggerDoc: SwaggerDoc): Map<string, {
+        hooks: string;
+        types: string;
+    }>;
     /**
-     * Generates header content for a specific tag
+     * Checks if a schema is used in any of the endpoints
      */
-    generateHeaderForTag(tag: string): string;
+    isSchemaUsedInEndpoints(schemaName: string, endpoints: Array<{
+        path: string;
+        method: string;
+        endpointInfo: any;
+    }>, allSchemas: {
+        [key: string]: any;
+    }): boolean;
+    /**
+     * Checks if a schema contains a reference to another schema
+     */
+    schemaContainsRef(schema: any, targetSchemaName: string, allSchemas: {
+        [key: string]: any;
+    }): boolean;
+    /**
+     * Find all referenced schemas from a set of directly used schemas
+     */
+    findAllReferencedSchemas(initialSchemas: Set<string>, allSchemas: {
+        [key: string]: any;
+    }): Set<string>;
+    /**
+     * Find schema references in a given schema
+     */
+    findSchemaReferences(schema: any, allSchemas: {
+        [key: string]: any;
+    }): Set<string>;
     /**
      * Generates a parameter interface for an API endpoint
      */
@@ -107,15 +134,9 @@ export declare class SwaggerDocGenerator {
         [key: string]: any;
     }): string;
     /**
-     * Generates a single React hook for an API endpoint with unique parameter interface
+     * Generates a React Query hook using axios
      */
-    generateSingleHookWithUniqueName(path: string, method: string, endpointInfo: any, schemas: {
-        [key: string]: any;
-    }): string;
-    /**
-     * Generates a single React hook for an API endpoint
-     */
-    generateSingleHook(path: string, method: string, endpointInfo: any, schemas: {
+    generateReactQueryHook(path: string, method: string, endpointInfo: any, schemas: {
         [key: string]: any;
     }): string;
     /**
@@ -133,5 +154,8 @@ export declare class SwaggerDocGenerator {
     /**
      * Saves the generated React hooks to files organized by tag
      */
-    saveHooksByTag(hooksByTag: Map<string, string>, outputDir: string): void;
+    saveHooksByTag(hooksByTag: Map<string, {
+        hooks: string;
+        types: string;
+    }>, outputDir: string): void;
 }

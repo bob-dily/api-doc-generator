@@ -92,11 +92,11 @@ const argv = (0, yargs_1.default)((0, helpers_1.hideBin)(process.argv))
     .parseSync();
 async function run() {
     try {
-        // Create the generated directory if it doesn't exist
+        // Clean the entire generated directory before doing anything
         const generatedDir = './generated';
-        if (!fs.existsSync(generatedDir)) {
-            fs.mkdirSync(generatedDir, { recursive: true });
-            console.log(`Created directory: ${generatedDir}`);
+        if (fs.existsSync(generatedDir)) {
+            fs.rmSync(generatedDir, { recursive: true, force: true });
+            console.log(`Cleared generated directory: ${generatedDir}`);
         }
         const generator = new index_1.SwaggerDocGenerator();
         let swaggerDoc;
@@ -117,6 +117,10 @@ async function run() {
         }
         // Check if we need to generate types
         if (argv.generateTypes) {
+            // Create the generated directory if it doesn't exist
+            if (!fs.existsSync(generatedDir)) {
+                fs.mkdirSync(generatedDir, { recursive: true });
+            }
             console.log('Generating TypeScript type definitions...');
             const types = generator.generateTypeDefinitions(swaggerDoc);
             const typesOutputPath = argv.typesOutput.endsWith('.ts') ? argv.typesOutput :
@@ -126,13 +130,21 @@ async function run() {
         }
         // Check if we need to generate hooks
         if (argv.generateHooks) {
+            // Create the generated directory if it doesn't exist
+            if (!fs.existsSync(generatedDir)) {
+                fs.mkdirSync(generatedDir, { recursive: true });
+            }
             console.log('Generating React hooks...');
             const hooksByTag = generator.generateReactHooks(swaggerDoc);
             generator.saveHooksByTag(hooksByTag, argv.hooksOutput);
-            console.log(`React hooks generated successfully in: ${argv.hooksOutput}/`);
+            console.log(`React hooks and types generated successfully in: ${argv.hooksOutput}/`);
         }
         // Generate documentation if not generating types or hooks (for backward compatibility)
         if (!argv.generateTypes && !argv.generateHooks) {
+            // Create the generated directory if it doesn't exist
+            if (!fs.existsSync(generatedDir)) {
+                fs.mkdirSync(generatedDir, { recursive: true });
+            }
             console.log('Generating documentation...');
             const documentation = generator.generateDocumentation(swaggerDoc);
             generator.saveDocumentationToFile(documentation, argv.output);

@@ -287,7 +287,7 @@ class SwaggerDocGenerator {
         return `export type ${typeName} = ${convertTypeToTs(schema, allSchemas)};\n`;
     }
     /**
-     * Generates React hooks from the paths in Swagger doc
+     * Generates React hooks from the paths in Swagger doc organized by tag
      */
     generateReactHooks(swaggerDoc) {
         const hooksByTag = new Map();
@@ -304,10 +304,38 @@ class SwaggerDocGenerator {
                 endpointsByTag[tag].push({ path, method, endpointInfo });
             });
         });
-        // Generate hooks for each tag
+        // Generate hooks and types for each tag
         Object.entries(endpointsByTag).forEach(([tag, endpoints]) => {
-            let tagContent = this.generateHeaderForTag(tag);
-            // Generate all parameter interfaces for this tag first to avoid duplicates
+            // Generate TypeScript types for schemas used in this tag
+            let typesContent = `// ${toPascalCase(tag)} API Types\n\n`;
+            // First, find all directly used schemas in endpoints for this tag
+            const directlyUsedSchemas = new Set();
+            if (schemas) {
+                Object.entries(schemas).forEach(([typeName, schema]) => {
+                    if (this.isSchemaUsedInEndpoints(typeName, endpoints, schemas)) {
+                        directlyUsedSchemas.add(typeName);
+                    }
+                });
+            }
+            // Then, find all referenced schemas (schemas that are referenced by the directly used ones)
+            const allNeededSchemas = this.findAllReferencedSchemas(directlyUsedSchemas, schemas);
+            // Generate types for all needed schemas
+            if (schemas) {
+                for (const typeName of allNeededSchemas) {
+                    const schema = schemas[typeName];
+                    if (schema) {
+                        typesContent += this.generateSingleTypeDefinition(typeName, schema, schemas);
+                        typesContent += '\n';
+                    }
+                }
+            }
+            // Generate hooks content
+            let hooksContent = `// ${toPascalCase(tag)} API Hooks\n`;
+            hooksContent += `import { useQuery, useMutation, useQueryClient } from 'react-query';\n`;
+            hooksContent += `import axios from 'axios';\n`;
+            hooksContent += `// Import types\n`;
+            hooksContent += `import type { ${Object.keys(schemas).join(', ')} } from './${toCamelCase(tag)}.types';\n\n`;
+            // Generate parameter interfaces for this tag
             const allParamInterfaces = [];
             endpoints.forEach(({ path, method, endpointInfo }) => {
                 const paramInterface = this.generateParamInterface(path, method, endpointInfo, schemas);
@@ -317,22 +345,176 @@ class SwaggerDocGenerator {
             });
             // Add all unique parameter interfaces
             allParamInterfaces.forEach(interfaceCode => {
-                tagContent += interfaceCode + '\n';
+                hooksContent += interfaceCode + '\n';
             });
-            // Generate individual hooks
+            // Generate individual hooks using react-query and axios
             endpoints.forEach(({ path, method, endpointInfo }) => {
-                const hookContent = this.generateSingleHookWithUniqueName(path, method, endpointInfo, schemas);
-                tagContent += hookContent + '\n';
+                const hookContent = this.generateReactQueryHook(path, method, endpointInfo, schemas);
+                hooksContent += hookContent + '\n';
             });
-            hooksByTag.set(tag, tagContent);
+            hooksByTag.set(tag, { hooks: hooksContent, types: typesContent });
         });
         return hooksByTag;
     }
     /**
-     * Generates header content for a specific tag
+     * Checks if a schema is used in any of the endpoints
      */
-    generateHeaderForTag(tag) {
-        return `// ${toPascalCase(tag)} API Hooks\n\n`;
+    isSchemaUsedInEndpoints(schemaName, endpoints, allSchemas) {
+        for (const { endpointInfo } of endpoints) {
+            // Check if schema is used as response
+            if (endpointInfo.responses) {
+                for (const [, responseInfo] of Object.entries(endpointInfo.responses)) {
+                    if (responseInfo.content) {
+                        for (const [, contentInfo] of Object.entries(responseInfo.content)) {
+                            if (contentInfo.schema) {
+                                if (this.schemaContainsRef(contentInfo.schema, schemaName, allSchemas)) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Check if schema is used in parameters
+            if (endpointInfo.parameters) {
+                for (const param of endpointInfo.parameters) {
+                    if (param.schema && this.schemaContainsRef(param.schema, schemaName, allSchemas)) {
+                        return true;
+                    }
+                }
+            }
+            // Check if schema is used in request body
+            if (endpointInfo.requestBody && endpointInfo.requestBody.content) {
+                for (const [, contentInfo] of Object.entries(endpointInfo.requestBody.content)) {
+                    if (contentInfo.schema && this.schemaContainsRef(contentInfo.schema, schemaName, allSchemas)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    /**
+     * Checks if a schema contains a reference to another schema
+     */
+    schemaContainsRef(schema, targetSchemaName, allSchemas) {
+        if (!schema)
+            return false;
+        // Check if this schema directly references the target
+        if (schema.$ref) {
+            const refTypeName = schema.$ref.split('/').pop();
+            if (refTypeName === targetSchemaName) {
+                return true;
+            }
+        }
+        // Recursively check nested properties
+        if (schema.properties) {
+            for (const [, propSchema] of Object.entries(schema.properties)) {
+                if (this.schemaContainsRef(propSchema, targetSchemaName, allSchemas)) {
+                    return true;
+                }
+            }
+        }
+        // Check if it's an array schema
+        if (schema.items) {
+            if (this.schemaContainsRef(schema.items, targetSchemaName, allSchemas)) {
+                return true;
+            }
+        }
+        // Check allOf, oneOf, anyOf
+        if (schema.allOf) {
+            for (const item of schema.allOf) {
+                if (this.schemaContainsRef(item, targetSchemaName, allSchemas)) {
+                    return true;
+                }
+            }
+        }
+        if (schema.oneOf) {
+            for (const item of schema.oneOf) {
+                if (this.schemaContainsRef(item, targetSchemaName, allSchemas)) {
+                    return true;
+                }
+            }
+        }
+        if (schema.anyOf) {
+            for (const item of schema.anyOf) {
+                if (this.schemaContainsRef(item, targetSchemaName, allSchemas)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    /**
+     * Find all referenced schemas from a set of directly used schemas
+     */
+    findAllReferencedSchemas(initialSchemas, allSchemas) {
+        const result = new Set([...initialSchemas]); // Start with initial schemas
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const typeName of [...result]) { // Use spread to create a new array to avoid concurrent modification
+                const schema = allSchemas[typeName];
+                if (schema) {
+                    // Check for references in the schema
+                    const referencedSchemas = this.findSchemaReferences(schema, allSchemas);
+                    for (const refName of referencedSchemas) {
+                        if (!result.has(refName) && allSchemas[refName]) {
+                            result.add(refName);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+    /**
+     * Find schema references in a given schema
+     */
+    findSchemaReferences(schema, allSchemas) {
+        const references = new Set();
+        if (!schema)
+            return references;
+        // Check direct $ref
+        if (schema.$ref) {
+            const refTypeName = schema.$ref.split('/').pop();
+            if (refTypeName && allSchemas[refTypeName]) {
+                references.add(refTypeName);
+            }
+        }
+        // Check properties
+        if (schema.properties) {
+            Object.values(schema.properties).forEach((propSchema) => {
+                const nestedRefs = this.findSchemaReferences(propSchema, allSchemas);
+                nestedRefs.forEach(ref => references.add(ref));
+            });
+        }
+        // Check array items
+        if (schema.items) {
+            const itemRefs = this.findSchemaReferences(schema.items, allSchemas);
+            itemRefs.forEach(ref => references.add(ref));
+        }
+        // Check allOf, oneOf, anyOf
+        if (schema.allOf) {
+            schema.allOf.forEach((item) => {
+                const itemRefs = this.findSchemaReferences(item, allSchemas);
+                itemRefs.forEach(ref => references.add(ref));
+            });
+        }
+        if (schema.oneOf) {
+            schema.oneOf.forEach((item) => {
+                const itemRefs = this.findSchemaReferences(item, allSchemas);
+                itemRefs.forEach(ref => references.add(ref));
+            });
+        }
+        if (schema.anyOf) {
+            schema.anyOf.forEach((item) => {
+                const itemRefs = this.findSchemaReferences(item, allSchemas);
+                itemRefs.forEach(ref => references.add(ref));
+            });
+        }
+        return references;
     }
     /**
      * Generates a parameter interface for an API endpoint
@@ -366,24 +548,15 @@ class SwaggerDocGenerator {
         return paramsInterface;
     }
     /**
-     * Generates a single React hook for an API endpoint with unique parameter interface
+     * Generates a React Query hook using axios
      */
-    generateSingleHookWithUniqueName(path, method, endpointInfo, schemas) {
+    generateReactQueryHook(path, method, endpointInfo, schemas) {
         const operationId = endpointInfo.operationId || this.generateOperationId(path, method);
         const hookName = `use${toPascalCase(operationId)}`;
+        const hookType = method.toLowerCase() === 'get' ? 'useQuery' : 'useMutation';
         // Use unique parameter interface name
         const pathParams = endpointInfo.parameters?.filter((p) => p.in === 'path') || [];
         const queryParams = endpointInfo.parameters?.filter((p) => p.in === 'query') || [];
-        let paramsDeclaration = '';
-        let paramsUsage = '{}';
-        const hasParams = pathParams.length > 0 || queryParams.length > 0;
-        if (hasParams) {
-            const paramInterfaceName = `${toPascalCase(operationId)}Params`;
-            paramsDeclaration = `params: ${paramInterfaceName}`;
-            paramsUsage = 'params';
-        }
-        // Format the path for use in the code (handle path parameters)
-        const pathWithParams = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
         // Determine response type
         let responseType = 'any';
         if (endpointInfo.responses && endpointInfo.responses['200']) {
@@ -393,53 +566,86 @@ class SwaggerDocGenerator {
             }
         }
         // Generate request body parameter if needed
-        let requestBodyParam = '';
+        let requestBodyType = 'any';
+        let hasBody = false;
         if (method.toLowerCase() !== 'get' && method.toLowerCase() !== 'delete' && endpointInfo.requestBody) {
             const bodySchema = endpointInfo.requestBody.content?.['application/json']?.schema;
             if (bodySchema) {
-                const bodyType = convertTypeToTs(bodySchema, schemas);
-                requestBodyParam = `, body: ${bodyType}`;
+                requestBodyType = convertTypeToTs(bodySchema, schemas);
+                hasBody = true;
             }
         }
-        // Create the hook function
-        let hookCode = `export const ${hookName} = () => {\n`;
-        hookCode += `  const apiCall = async (${paramsDeclaration}${requestBodyParam ? requestBodyParam : ''}) => {\n`;
-        hookCode += `    const path = \`\${process.env.REACT_APP_API_BASE_URL || ''}${pathWithParams}\`;\n`;
-        // Add query parameters
-        if (endpointInfo.parameters && endpointInfo.parameters.some((p) => p.in === 'query')) {
-            hookCode += `    const queryParams = new URLSearchParams();\n`;
-            endpointInfo.parameters.forEach((param) => {
-                if (param.in === 'query') {
-                    hookCode += `    if (params.${toCamelCase(param.name)}) queryParams.append('${param.name}', params.${toCamelCase(param.name)}.toString());\n`;
-                }
-            });
-            hookCode += `    const queryString = queryParams.toString();\n`;
-            hookCode += `    const url = \`\${path}\${queryString ? '?' + queryString : ''}\`;\n`;
+        // Format the path for use in the code (handle path parameters)
+        const pathWithParams = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
+        const axiosPath = `\`\${process.env.REACT_APP_API_BASE_URL || ''}${pathWithParams}\``;
+        // Generate the hook code
+        let hookCode = '';
+        if (method.toLowerCase() === 'get') {
+            // For GET requests, use useQuery
+            const hasParams = pathParams.length > 0 || queryParams.length > 0;
+            if (hasParams) {
+                const paramInterfaceName = `${toPascalCase(operationId)}Params`;
+                hookCode += `export const ${hookName} = (params: ${paramInterfaceName}) => {\n`;
+                hookCode += `  return useQuery({\n`;
+                hookCode += `    queryKey: ['${operationId}', params],\n`;
+                hookCode += `    queryFn: async () => {\n`;
+                hookCode += `      const response = await axios.get<${responseType}>(${axiosPath}, { params });\n`;
+                hookCode += `      return response.data;\n`;
+                hookCode += `    },\n`;
+                hookCode += `  });\n`;
+                hookCode += `};\n`;
+            }
+            else {
+                hookCode += `export const ${hookName} = () => {\n`;
+                hookCode += `  return useQuery({\n`;
+                hookCode += `    queryKey: ['${operationId}'],\n`;
+                hookCode += `    queryFn: async () => {\n`;
+                hookCode += `      const response = await axios.get<${responseType}>(${axiosPath});\n`;
+                hookCode += `      return response.data;\n`;
+                hookCode += `    },\n`;
+                hookCode += `  });\n`;
+                hookCode += `};\n`;
+            }
         }
         else {
-            hookCode += `    const url = path;\n`;
+            // For non-GET requests, use useMutation
+            const hasPathParams = pathParams.length > 0;
+            if (hasPathParams) {
+                const paramInterfaceName = `${toPascalCase(operationId)}Params`;
+                hookCode += `export const ${hookName} = () => {\n`;
+                hookCode += `  const queryClient = useQueryClient();\n\n`;
+                hookCode += `  return useMutation({\n`;
+                hookCode += `    mutationFn: async ({ params, data }: { params: ${paramInterfaceName}; data: ${requestBodyType} }) => {\n`;
+                // Format the path for use in the code (handle path parameters)
+                let formattedPath = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
+                const pathWithParams = `\`\${process.env.REACT_APP_API_BASE_URL || ''}${formattedPath}\``;
+                hookCode += `      const response = await axios.${method.toLowerCase()}<${responseType}>(${pathWithParams}, data);\n`;
+                hookCode += `      return response.data;\n`;
+                hookCode += `    },\n`;
+                hookCode += `    onSuccess: () => {\n`;
+                hookCode += `      // Invalidate and refetch related queries\n`;
+                hookCode += `      queryClient.invalidateQueries({ queryKey: ['${operationId}'] });\n`;
+                hookCode += `    },\n`;
+                hookCode += `  });\n`;
+                hookCode += `};\n`;
+            }
+            else {
+                hookCode += `export const ${hookName} = () => {\n`;
+                hookCode += `  const queryClient = useQueryClient();\n\n`;
+                hookCode += `  return useMutation({\n`;
+                hookCode += `    mutationFn: async (data: ${requestBodyType}) => {\n`;
+                hookCode += `      const response = await axios.${method.toLowerCase()}<${responseType}>(${axiosPath}, data);\n`;
+                hookCode += `      return response.data;\n`;
+                hookCode += `    },\n`;
+                hookCode += `    onSuccess: () => {\n`;
+                hookCode += `      // Invalidate and refetch related queries\n`;
+                hookCode += `      queryClient.invalidateQueries({ queryKey: ['${operationId}'] });\n`;
+                hookCode += `    },\n`;
+                hookCode += `  });\n`;
+                hookCode += `};\n`;
+            }
         }
-        // Add fetch options
-        hookCode += `    const options: RequestInit = {\n`;
-        hookCode += `      method: '${method.toUpperCase()}',\n`;
-        if (requestBodyParam) {
-            hookCode += `      headers: {\n        'Content-Type': 'application/json',\n      },\n`;
-            hookCode += `      body: JSON.stringify(body),\n`;
-        }
-        hookCode += `    };\n\n`;
-        hookCode += `    const result = await fetch(url, options);\n`;
-        hookCode += `    return result.json() as Promise<${responseType}>;\n`;
-        hookCode += `  };\n\n`;
-        hookCode += `  return { ${toCamelCase(operationId)}: apiCall };\n`;
-        hookCode += `};\n`;
         return hookCode;
-    }
-    /**
-     * Generates a single React hook for an API endpoint
-     */
-    generateSingleHook(path, method, endpointInfo, schemas) {
-        // This method is kept for backward compatibility
-        return this.generateSingleHookWithUniqueName(path, method, endpointInfo, schemas);
     }
     /**
      * Generate operation ID from path and method if not provided
@@ -475,13 +681,19 @@ class SwaggerDocGenerator {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        for (const [tag, content] of hooksByTag) {
+        for (const [tag, { hooks, types }] of hooksByTag) {
             const tagDir = path.join(outputDir, toCamelCase(tag));
             if (!fs.existsSync(tagDir)) {
                 fs.mkdirSync(tagDir, { recursive: true });
             }
-            const fileName = path.join(tagDir, `${toCamelCase(tag)}.hooks.ts`);
-            fs.writeFileSync(fileName, content, 'utf8');
+            // Save hooks to hooks file
+            const hooksFileName = path.join(tagDir, `${toCamelCase(tag)}.hooks.ts`);
+            fs.writeFileSync(hooksFileName, hooks, 'utf8');
+            // Save types to types file
+            if (types.trim()) { // Only save if there are types
+                const typesFileName = path.join(tagDir, `${toCamelCase(tag)}.types.ts`);
+                fs.writeFileSync(typesFileName, types, 'utf8');
+            }
         }
     }
 }
