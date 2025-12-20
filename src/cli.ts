@@ -44,6 +44,21 @@ const argv = yargs(hideBin(process.argv))
     type: 'string',
     default: './generated/hooks'
   })
+  .option('handlebars-templates', {
+    describe: 'Use Handlebars templates for generation',
+    type: 'boolean',
+    default: false
+  })
+  .option('hooks-template', {
+    describe: 'Path to custom hooks template (default: templates/hooks/react-hook.hbs)',
+    type: 'string',
+    default: './templates/hooks/react-hook.hbs'
+  })
+  .option('types-template', {
+    describe: 'Path to custom types template (default: templates/types/type-definition.hbs)',
+    type: 'string',
+    default: './templates/types/type-definition.hbs'
+  })
   .check((argv) => {
     if (!argv.url && !argv.input) {
       throw new Error('Either --url or --input must be provided');
@@ -107,7 +122,16 @@ async function run(): Promise<void> {
       }
 
       console.log('Generating React hooks...');
-      const hooksByTag = generator.generateReactHooks(swaggerDoc);
+      let hooksByTag;
+      if (argv.handlebarsTemplates) {
+        console.log('Using Handlebars templates for generation...');
+        hooksByTag = generator.generateHandlebarsResources(swaggerDoc, {
+          hooks: argv.hooksTemplate,
+          types: argv.typesTemplate
+        });
+      } else {
+        hooksByTag = generator.generateReactHooks(swaggerDoc);
+      }
       generator.saveHooksByTag(hooksByTag, argv.hooksOutput);
       console.log(`React hooks and types generated successfully in: ${argv.hooksOutput}/`);
     }

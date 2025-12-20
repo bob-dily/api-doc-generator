@@ -1,6 +1,8 @@
 import axios, { AxiosResponse } from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
+import { compileTemplate } from './helpers/template.helpers';
+import { generateSingleTypeDefinition } from './helpers/type.helpers';
 
 export interface SwaggerDoc {
   swagger?: string;
@@ -97,79 +99,28 @@ function toCamelCase(str: string): string {
     .replace(/\s+/g, '');
 }
 
-/**
- * Converts OpenAPI types to TypeScript types
- */
-function convertTypeToTs(typeDef: any, schemaComponents: { [key: string]: any }): string {
-  if (!typeDef) return 'any';
-
-  if (typeDef.$ref) {
-    // Extract the type name from the reference
-    const refTypeName = typeDef.$ref.split('/').pop();
-    return refTypeName || 'any';
-  }
-
-  // Handle allOf (used for composition/references)
-  if (typeDef.allOf && Array.isArray(typeDef.allOf)) {
-    return typeDef.allOf.map((item: any) => {
-      if (item.$ref) {
-        return item.$ref.split('/').pop();
-      } else if (item.type) {
-        return convertTypeToTs(item, schemaComponents);
-      }
-      return 'any';
-    }).filter(Boolean).join(' & ') || 'any';
-  }
-
-  if (Array.isArray(typeDef.type)) {
-    // Handle union types like ["string", "null"]
-    if (typeDef.type.includes('null')) {
-      const nonNullType = typeDef.type.find((t: string) => t !== 'null');
-      return `${convertTypeToTs({...typeDef, type: nonNullType}, schemaComponents)} | null`;
-    }
-    return 'any';
-  }
-
-  switch (typeDef.type) {
-    case 'string':
-      if (typeDef.enum) {
-        return `"${typeDef.enum.join('" | "')}"`;
-      }
-      if (typeDef.format === 'date' || typeDef.format === 'date-time') {
-        return 'string';
-      }
-      return 'string';
-    case 'integer':
-    case 'number':
-      return 'number';
-    case 'boolean':
-      return 'boolean';
-    case 'array':
-      if (typeDef.items) {
-        return `${convertTypeToTs(typeDef.items, schemaComponents)}[]`;
-      }
-      return 'any[]';
-    case 'object':
-      if (typeDef.properties) {
-        // Inline object definition
-        const fields = Object.entries(typeDef.properties)
-          .map(([propName, propSchema]: [string, any]) => {
-            const required = typeDef.required && typeDef.required.includes(propName);
-            const optional = !required ? '?' : '';
-            return `  ${propName}${optional}: ${convertTypeToTs(propSchema, schemaComponents)};`;
-          })
-          .join('\n');
-        return `{\n${fields}\n}`;
-      }
-      return 'Record<string, any>';
-    case 'null':
-      return 'null';
-    default:
-      return 'any';
-  }
-}
-
 export class SwaggerDocGenerator {
+  /**
+   * Transforms a string to PascalCase
+   */
+  private toPascalCase(str: string): string {
+    return str
+      .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => {
+        return index === 0 ? word.toUpperCase() : word.toUpperCase();
+      })
+      .replace(/\s+/g, '');
+  }
+
+  /**
+   * Transforms a string to camelCase
+   */
+  private toCamelCase(str: string): string {
+    return str
+      .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => {
+        return index === 0 ? word.toLowerCase() : word.toUpperCase();
+      })
+      .replace(/\s+/g, '');
+  }
   /**
    * Fetches the Swagger/OpenAPI JSON from a given URL
    */
@@ -295,6 +246,151 @@ export class SwaggerDocGenerator {
   }
 
   /**
+   * Generates React hooks from the paths in Swagger doc organized by tag
+   */
+
+  /**
+   * Converts OpenAPI types to TypeScript types
+   */
+  private convertTypeToTs(typeDef: any, schemaComponents: { [key: string]: any }): string {
+    if (!typeDef) return 'any';
+
+    if (typeDef.$ref) {
+      // Extract the type name from the reference
+      const refTypeName = typeDef.$ref.split('/').pop();
+      return refTypeName || 'any';
+    }
+
+    // Handle allOf (used for composition/references) - combine all properties
+    if (typeDef.allOf && Array.isArray(typeDef.allOf)) {
+      const combinedProperties: any = {};
+      const refTypes: string[] = [];
+
+      for (const item of typeDef.allOf) {
+        if (item.$ref) {
+          // Extract the type name from the reference
+          const refTypeName = item.$ref.split('/').pop();
+          if (refTypeName) {
+            refTypes.push(refTypeName);
+          }
+        } else if (item.type === 'object' && item.properties) {
+          // Combine properties from inline object definitions
+          Object.assign(combinedProperties, item.properties);
+        }
+      }
+
+      if (refTypes.length > 0 && Object.keys(combinedProperties).length > 0) {
+        // We have both references and inline properties
+        const inlineDef = {
+          type: 'object',
+          properties: combinedProperties,
+          required: typeDef.required
+        };
+        const inlineType = this.convertTypeToTs(inlineDef, schemaComponents);
+        return `${refTypes.join(' & ')} & ${inlineType}`;
+      } else if (refTypes.length > 0) {
+        // Only references
+        return refTypes.join(' & ');
+      } else if (Object.keys(combinedProperties).length > 0) {
+        // Only inline properties
+        return this.convertTypeToTs({
+          type: 'object',
+          properties: combinedProperties,
+          required: typeDef.required
+        }, schemaComponents);
+      } else {
+        return 'any';
+      }
+    }
+
+    // Handle oneOf (union types)
+    if (typeDef.oneOf && Array.isArray(typeDef.oneOf)) {
+      return typeDef.oneOf.map((item: any) => {
+        if (item.$ref) {
+          return item.$ref.split('/').pop();
+        } else if (item.type) {
+          return this.convertTypeToTs(item, schemaComponents);
+        }
+        return 'any';
+      }).filter(Boolean).join(' | ') || 'any';
+    }
+
+    // Handle anyOf (union types)
+    if (typeDef.anyOf && Array.isArray(typeDef.anyOf)) {
+      return typeDef.anyOf.map((item: any) => {
+        if (item.$ref) {
+          return item.$ref.split('/').pop();
+        } else if (item.type) {
+          return this.convertTypeToTs(item, schemaComponents);
+        }
+        return 'any';
+      }).filter(Boolean).join(' | ') || 'any';
+    }
+
+    if (Array.isArray(typeDef.type)) {
+      // Handle union types like ["string", "null"]
+      if (typeDef.type.includes('null')) {
+        const nonNullTypes = typeDef.type.filter((t: string) => t !== 'null');
+        if (nonNullTypes.length === 1) {
+          return `${this.convertTypeToTs({...typeDef, type: nonNullTypes[0]}, schemaComponents)} | null`;
+        } else {
+          // Handle complex union types with null
+          const nonNullTypeStr = nonNullTypes
+            .map((t: string) => this.convertTypeToTs({...typeDef, type: t}, schemaComponents))
+            .join(' | ');
+          return `${nonNullTypeStr} | null`;
+        }
+      }
+      // Handle other array type unions
+      return typeDef.type
+        .map((t: string) => this.convertTypeToTs({...typeDef, type: t}, schemaComponents))
+        .join(' | ') || 'any';
+    }
+
+    switch (typeDef.type) {
+      case 'string':
+        if (typeDef.enum) {
+          return `"${typeDef.enum.join('" | "')}"`;
+        }
+        if (typeDef.format === 'date' || typeDef.format === 'date-time') {
+          return 'string';
+        }
+        return 'string';
+      case 'integer':
+      case 'number':
+        return 'number';
+      case 'boolean':
+        return 'boolean';
+      case 'array':
+        if (typeDef.items) {
+          return `${this.convertTypeToTs(typeDef.items, schemaComponents)}[]`;
+        }
+        return 'any[]';
+      case 'object':
+        if (typeDef.properties) {
+          // Inline object definition
+          const fields = Object.entries(typeDef.properties)
+            .map(([propName, propSchema]: [string, any]) => {
+              const required = typeDef.required && typeDef.required.includes(propName);
+              const optional = !required ? '?' : '';
+              const type = this.convertTypeToTs(propSchema, schemaComponents);
+              // Get the description for JSDoc if available
+              const propDescription = propSchema.description || propSchema.title;
+              const jsDoc = propDescription ? `    /** ${propDescription} */\n` : '';
+              return `${jsDoc}    ${propName}${optional}: ${type};`;
+            })
+            .join('\n');
+          return `{\n${fields}\n  }`;
+        }
+        return 'Record<string, any>';
+      case 'null':
+        return 'null';
+      default:
+        return 'any';
+    }
+  }
+
+  /**
    * Generates a single TypeScript type definition
    */
   generateSingleTypeDefinition(typeName: string, schema: any, allSchemas: { [key: string]: any }): string {
@@ -303,19 +399,37 @@ export class SwaggerDocGenerator {
       return `export type ${typeName} = ${schema.enum.map((val: any) => `'${val}'`).join(' | ')};\n`;
     }
 
-    if (schema.oneOf || schema.anyOf || schema.allOf) {
-      // Union type or complex type
-      const typeOption = schema.oneOf ? 'oneOf' : schema.anyOf ? 'anyOf' : 'allOf';
+    if (schema.oneOf || schema.anyOf) {
+      // Union type or complex type (oneOf/anyOf)
+      const typeOption = schema.oneOf ? 'oneOf' : 'anyOf';
       const types = schema[typeOption].map((item: any) => {
         if (item.$ref) {
           return item.$ref.split('/').pop();
         } else if (item.type) {
-          return convertTypeToTs(item, allSchemas);
+          return this.convertTypeToTs(item, allSchemas);
         } else {
           return 'any';
         }
       }).filter(Boolean);
       return `export type ${typeName} = ${types.join(' | ')};\n`;
+    }
+
+    if (schema.allOf) {
+      // Handle allOf - composition of multiple schemas
+      const allParts: string[] = [];
+      for (const part of schema.allOf) {
+        if (part.$ref) {
+          const refTypeName = part.$ref.split('/').pop();
+          if (refTypeName) {
+            allParts.push(refTypeName);
+          }
+        } else if (part.type === 'object' && part.properties) {
+          // Create a temporary interface for inline object
+          const inlineInterface = this.generateInlineObjectInterface(part, `${typeName}Inline`, allSchemas);
+          allParts.push(inlineInterface);
+        }
+      }
+      return `export type ${typeName} = ${allParts.join(' & ')};\n`;
     }
 
     if (schema.type === 'object') {
@@ -327,12 +441,13 @@ export class SwaggerDocGenerator {
           const required = schema.required && schema.required.includes(propName);
           const optional = !required ? '?' : '';
 
-          // Add JSDoc comment if available
-          if (propSchema.description) {
-            result += `  /** ${propSchema.description} */\n`;
+          // Add JSDoc comment if available (using title or description)
+          const jsDoc = propSchema.title || propSchema.description;
+          if (jsDoc) {
+            result += `  /** ${jsDoc} */\n`;
           }
 
-          result += `  ${propName}${optional}: ${convertTypeToTs(propSchema, allSchemas)};\n`;
+          result += `  ${propName}${optional}: ${this.convertTypeToTs(propSchema, allSchemas)};\n`;
         });
       }
 
@@ -341,7 +456,30 @@ export class SwaggerDocGenerator {
     }
 
     // For other types (string, number, etc.) that might have additional properties
-    return `export type ${typeName} = ${convertTypeToTs(schema, allSchemas)};\n`;
+    return `export type ${typeName} = ${this.convertTypeToTs(schema, allSchemas)};\n`;
+  }
+
+  /**
+   * Generates an inline object interface for allOf composition
+   */
+  private generateInlineObjectInterface(schema: any, tempName: string, allSchemas: { [key: string]: any }): string {
+    if (!schema.properties) return 'any';
+
+    let result = '{\n';
+    Object.entries(schema.properties).forEach(([propName, propSchema]: [string, any]) => {
+      const required = schema.required && schema.required.includes(propName);
+      const optional = !required ? '?' : '';
+
+      // Add JSDoc comment if available (using title or description)
+      const jsDoc = propSchema.title || propSchema.description;
+      if (jsDoc) {
+        result += `    /** ${jsDoc} */\n`;
+      }
+
+      result += `    ${propName}${optional}: ${this.convertTypeToTs(propSchema, allSchemas)};\n`;
+    });
+    result += '  }';
+    return result;
   }
 
   /**
@@ -678,15 +816,15 @@ export class SwaggerDocGenerator {
     // Add path parameters
     pathParams.forEach((param: Parameter) => {
       const required = param.required ? '' : '?';
-      const type = convertTypeToTs(param.schema || {}, schemas);
-      paramsInterface += `  ${toCamelCase(param.name)}${required}: ${type};\n`;
+      const type = this.convertTypeToTs(param.schema || {}, schemas);
+      paramsInterface += `  ${this.toCamelCase(param.name)}${required}: ${type};\n`;
     });
 
     // Add query parameters
     queryParams.forEach((param: Parameter) => {
       const required = param.required ? '' : '?';
-      const type = convertTypeToTs(param.schema || {}, schemas);
-      paramsInterface += `  ${toCamelCase(param.name)}${required}: ${type};\n`;
+      const type = this.convertTypeToTs(param.schema || {}, schemas);
+      paramsInterface += `  ${this.toCamelCase(param.name)}${required}: ${type};\n`;
     });
 
     paramsInterface += '}\n';
@@ -701,18 +839,18 @@ export class SwaggerDocGenerator {
 
     // Extract action name from operationId to create cleaner hook names
     // e.g. configController_updateConfig -> useUpdateConfig instead of useConfigController_updateConfig
-    let hookName = `use${toPascalCase(operationId)}`;
+    let hookName = `use${this.toPascalCase(operationId)}`;
 
     // Check if operationId follows pattern controller_action and simplify to action
     if (operationId.includes('_')) {
       const parts = operationId.split('_');
       if (parts.length >= 2) {
         // Use just the action part as the hook name
-        hookName = `use${toPascalCase(parts[parts.length - 1])}`;
+        hookName = `use${this.toPascalCase(parts[parts.length - 1])}`;
       }
     } else {
       // For operationIds without underscores, keep the original naming
-      hookName = `use${toPascalCase(operationId)}`;
+      hookName = `use${this.toPascalCase(operationId)}`;
     }
 
     const hookType = method.toLowerCase() === 'get' ? 'useQuery' : 'useMutation';
@@ -721,12 +859,19 @@ export class SwaggerDocGenerator {
     const pathParams = endpointInfo.parameters?.filter((p: Parameter) => p.in === 'path') || [];
     const queryParams = endpointInfo.parameters?.filter((p: Parameter) => p.in === 'query') || [];
 
-    // Determine response type
+    // Determine response type by checking common success response codes
     let responseType = 'any';
-    if (endpointInfo.responses && endpointInfo.responses['200']) {
-      const responseSchema = endpointInfo.responses['200'].content?.['application/json']?.schema;
-      if (responseSchema) {
-        responseType = convertTypeToTs(responseSchema, schemas);
+    if (endpointInfo.responses) {
+      // Check for success responses in order of preference: 200, 201, 204, etc.
+      const successCodes = ['200', '201', '204', '202', '203', '205'];
+      for (const code of successCodes) {
+        if (endpointInfo.responses[code]) {
+          const responseSchema = endpointInfo.responses[code].content?.['application/json']?.schema;
+          if (responseSchema) {
+            responseType = this.convertTypeToTs(responseSchema, schemas);
+            break; // Use the first success response found
+          }
+        }
       }
     }
 
@@ -736,81 +881,42 @@ export class SwaggerDocGenerator {
     if (method.toLowerCase() !== 'get' && method.toLowerCase() !== 'delete' && endpointInfo.requestBody) {
       const bodySchema = endpointInfo.requestBody.content?.['application/json']?.schema;
       if (bodySchema) {
-        requestBodyType = convertTypeToTs(bodySchema, schemas);
+        requestBodyType = this.convertTypeToTs(bodySchema, schemas);
         hasBody = true;
       }
     }
 
     // Format the path for use in the code (handle path parameters) - without base URL
-    const formattedPath = path.replace(/{(\w+)}/g, (_, param) => `\${params.${toCamelCase(param)}}`);
-    const axiosPath = `\`${formattedPath}\``;
+    const formattedPath = path.replace(/{(\w+)}/g, (_, param) => `\${params.${this.toCamelCase(param)}}`);
 
-    // Generate the hook code
-    let hookCode = '';
+    // Prepare data for the template
+    const hookData = {
+      hookName: hookName,
+      operationId: operationId,
+      method: method.toLowerCase(),
+      responseType: responseType,
+      requestBodyType: requestBodyType,
+      hasParams: pathParams.length > 0 || queryParams.length > 0,
+      hasPathParams: pathParams.length > 0,
+      paramInterfaceName: `${hookName.replace('use', '')}Params`,
+      formattedPath: formattedPath,
+      isGetRequest: method.toLowerCase() === 'get'
+    };
 
-    if (method.toLowerCase() === 'get') {
-      // For GET requests, use useQuery
-      const hasParams = pathParams.length > 0 || queryParams.length > 0;
-      if (hasParams) {
-        // Generate simpler parameter interface name based on hook name instead of operationId
-        const paramInterfaceName = `${hookName.replace('use', '')}Params`;
-        hookCode += `export const ${hookName} = (params: ${paramInterfaceName}) => {\n`;
-        hookCode += `  return useQuery({\n`;
-        hookCode += `    queryKey: ['${operationId}', params],\n`;
-        hookCode += `    queryFn: async () => {\n`;
-        hookCode += `      const response = await axios.get<${responseType}>(${axiosPath}, { params });\n`;
-        hookCode += `      return response.data;\n`;
-        hookCode += `    },\n`;
-        hookCode += `  });\n`;
-        hookCode += `};\n`;
-      } else {
-        hookCode += `export const ${hookName} = () => {\n`;
-        hookCode += `  return useQuery({\n`;
-        hookCode += `    queryKey: ['${operationId}'],\n`;
-        hookCode += `    queryFn: async () => {\n`;
-        hookCode += `      const response = await axios.get<${responseType}>(${axiosPath});\n`;
-        hookCode += `      return response.data;\n`;
-        hookCode += `    },\n`;
-        hookCode += `  });\n`;
-        hookCode += `};\n`;
-      }
-    } else {
-      // For non-GET requests, use useMutation
-      const hasPathParams = pathParams.length > 0;
-      if (hasPathParams) {
-        // Generate simpler parameter interface name based on hook name instead of operationId
-        const paramInterfaceName = `${hookName.replace('use', '')}Params`;
-        hookCode += `export const ${hookName} = () => {\n`;
-        hookCode += `  const queryClient = useQueryClient();\n\n`;
-        hookCode += `  return useMutation({\n`;
-        hookCode += `    mutationFn: async ({ params, data }: { params: ${paramInterfaceName}; data: ${requestBodyType} }) => {\n`;
-        hookCode += `      const response = await axios.${method.toLowerCase()}<${responseType}>(${axiosPath}, data);\n`;
-        hookCode += `      return response.data;\n`;
-        hookCode += `    },\n`;
-        hookCode += `    onSuccess: () => {\n`;
-        hookCode += `      // Invalidate and refetch related queries\n`;
-        hookCode += `      queryClient.invalidateQueries({ queryKey: ['${operationId}'] });\n`;
-        hookCode += `    },\n`;
-        hookCode += `  });\n`;
-        hookCode += `};\n`;
-      } else {
-        hookCode += `export const ${hookName} = () => {\n`;
-        hookCode += `  const queryClient = useQueryClient();\n\n`;
-        hookCode += `  return useMutation({\n`;
-        hookCode += `    mutationFn: async (data: ${requestBodyType}) => {\n`;
-        hookCode += `      const response = await axios.${method.toLowerCase()}<${responseType}>(${axiosPath}, data);\n`;
-        hookCode += `      return response.data;\n`;
-        hookCode += `    },\n`;
-        hookCode += `    onSuccess: () => {\n`;
-        hookCode += `      // Invalidate and refetch related queries\n`;
-        hookCode += `      queryClient.invalidateQueries({ queryKey: ['${operationId}'] });\n`;
-        hookCode += `    },\n`;
-        hookCode += `  });\n`;
-        hookCode += `};\n`;
-      }
+    // Load and compile the individual hook template
+    const fs = require('fs');
+    const pathModule = require('path');
+    const templatePath = pathModule.join(__dirname, '..', 'templates', 'hooks', 'individual-hook.hbs');
+
+    try {
+      const templateSource = fs.readFileSync(templatePath, 'utf8');
+      const Handlebars = require('handlebars');
+      const template = Handlebars.compile(templateSource);
+      return template(hookData);
+    } catch (error: any) {
+      console.error(`Error reading template file: ${error.message}`);
+      return `// Error generating hook for ${operationId}: ${error.message}`;
     }
-
-    return hookCode;
   }
 
 
@@ -934,5 +1040,173 @@ export class SwaggerDocGenerator {
         fs.writeFileSync(typesFileName, formattedTypes, 'utf8');
       }
     }
+  }
+
+  /**
+   * Generates frontend resources using Handlebars templates
+   */
+  generateHandlebarsResources(swaggerDoc: SwaggerDoc, templatePaths: {
+    hooks?: string,
+    types?: string,
+    components?: string,
+    pages?: string
+  } = {}): Map<string, { hooks: string, types: string }> {
+    const resourcesByTag = new Map<string, { hooks: string, types: string }>();
+    const schemas = swaggerDoc.components?.schemas || {};
+
+    // Group endpoints by tag
+    const endpointsByTag: { [tag: string]: Array<{ path: string, method: string, endpointInfo: any }> } = {};
+
+    Object.entries(swaggerDoc.paths).forEach(([path, methods]) => {
+      Object.entries(methods).forEach(([method, endpointInfo]: [string, any]) => {
+        // Determine the tag for this endpoint
+        const tag = (endpointInfo.tags && endpointInfo.tags[0]) ? endpointInfo.tags[0] : 'General';
+
+        if (!endpointsByTag[tag]) {
+          endpointsByTag[tag] = [];
+        }
+        endpointsByTag[tag].push({ path, method, endpointInfo });
+      });
+    });
+
+    // Generate resources for each tag
+    Object.entries(endpointsByTag).forEach(([tag, endpoints]) => {
+      // Prepare context for templates
+      const context: any = {
+        title: swaggerDoc.info.title,
+        description: swaggerDoc.info.description || swaggerDoc.info.title,
+        version: swaggerDoc.info.version,
+        tag: tag,
+        endpoints: endpoints.map(e => ({
+          path: e.path,
+          method: e.method.toUpperCase(),
+          operationId: e.endpointInfo.operationId || this.generateOperationId(e.path, e.method),
+          summary: e.endpointInfo.summary,
+          description: e.endpointInfo.description,
+          parameters: e.endpointInfo.parameters || [],
+          responses: e.endpointInfo.responses,
+          requestBody: e.endpointInfo.requestBody
+        })),
+        schemas: schemas,
+        hasImportTypes: false,
+        usedTypeNames: [] as string[],
+        paramInterfaces: [] as string[],
+        hooks: [] as string[],
+        typeDefinitions: [] as string[]
+      };
+
+      // Find types used in this tag
+      const directlyUsedSchemas = new Set<string>();
+      if (schemas) {
+        Object.entries(schemas).forEach(([typeName, schema]) => {
+          if (this.isSchemaUsedInEndpoints(typeName, endpoints, schemas)) {
+            directlyUsedSchemas.add(typeName);
+          }
+        });
+      }
+
+      const allNeededSchemas = this.findAllReferencedSchemas(directlyUsedSchemas, schemas);
+
+      // Generate TypeScript types
+      let typesContent = '';
+      if (schemas) {
+        for (const typeName of allNeededSchemas) {
+          const schema = schemas[typeName];
+          if (schema) {
+            const typeDef = generateSingleTypeDefinition(typeName, schema, schemas);
+            typesContent += typeDef + '\n';
+            context.typeDefinitions.push(typeDef);
+          }
+        }
+      }
+
+      // Check if there are used types for import
+      if (allNeededSchemas.size > 0) {
+        context.hasImportTypes = true;
+        context.usedTypeNames = Array.from(allNeededSchemas);
+      }
+
+      // Generate parameter interfaces
+      const allParamInterfaces: string[] = [];
+      endpoints.forEach(({ path, method, endpointInfo }) => {
+        const paramInterface = this.generateParamInterface(path, method, endpointInfo, schemas);
+        if (paramInterface && !allParamInterfaces.includes(paramInterface)) {
+          allParamInterfaces.push(paramInterface);
+        }
+      });
+
+      context.paramInterfaces = allParamInterfaces;
+
+      // Generate individual hooks
+      const allHooks: string[] = [];
+      const endpointHookContents: string[] = [];
+      endpoints.forEach(({ path, method, endpointInfo }) => {
+        const hookContent = this.generateReactQueryHook(path, method, endpointInfo, schemas);
+        allHooks.push(hookContent);
+        endpointHookContents.push(hookContent); // Store for template context
+      });
+
+      context.hooks = allHooks;
+      context.endpointHooks = endpointHookContents;
+
+      // Generate resources using specified templates
+      let hooksContent = '';
+      if (templatePaths.hooks) {
+        try {
+          // Add utility functions to context for use in templates
+          context['camelCase'] = (str: string) => this.toCamelCase(str);
+          context['pascalCase'] = (str: string) => this.toPascalCase(str);
+
+          hooksContent = compileTemplate(templatePaths.hooks, context);
+        } catch (error) {
+          // If template doesn't exist or fails, fall back to default generation
+          console.warn(`Failed to compile hooks template: ${templatePaths.hooks}`, error);
+          // Use the existing method as fallback
+          hooksContent = `// ${this.toPascalCase(tag)} API Hooks\n`;
+          hooksContent += `import { useQuery, useMutation, useQueryClient } from 'react-query';\n`;
+          hooksContent += `import axios from 'axios';\n`;
+
+          if (context.hasImportTypes) {
+            hooksContent += `import type { ${context.usedTypeNames.join(', ')} } from './${this.toCamelCase(tag)}.types';\n\n`;
+          } else {
+            hooksContent += `\n`;
+          }
+
+          allParamInterfaces.forEach(interfaceCode => {
+            hooksContent += interfaceCode + '\n';
+          });
+
+          allHooks.forEach(hookCode => {
+            hooksContent += hookCode + '\n';
+          });
+        }
+      } else {
+        // Default generation if no template is provided
+        hooksContent = `// ${this.toPascalCase(tag)} API Hooks\n`;
+        hooksContent += `import { useQuery, useMutation, useQueryClient } from 'react-query';\n`;
+        hooksContent += `import axios from 'axios';\n`;
+
+        if (context.hasImportTypes) {
+          hooksContent += `import type { ${context.usedTypeNames.join(', ')} } from './${this.toCamelCase(tag)}.types';\n\n`;
+        } else {
+          hooksContent += `\n`;
+        }
+
+        allParamInterfaces.forEach(interfaceCode => {
+          hooksContent += interfaceCode + '\n';
+        });
+
+        allHooks.forEach(hookCode => {
+          hooksContent += hookCode + '\n';
+        });
+      }
+
+      resourcesByTag.set(tag, {
+        hooks: hooksContent,
+        types: typesContent
+      });
+    });
+
+    return resourcesByTag;
   }
 }

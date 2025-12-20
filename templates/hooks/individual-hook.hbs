@@ -1,0 +1,55 @@
+{{#if isGetRequest}}
+  {{#if hasParams}}
+export const {{hookName}} = (params: {{paramInterfaceName}}) => {
+  return useQuery({
+    queryKey: ['{{operationId}}', params],
+    queryFn: async () => {
+      const response = await axios.get<{{responseType}}>(`{{{formattedPath}}}`, { params });
+      return response.data;
+    },
+  });
+};
+  {{else}}
+export const {{hookName}} = () => {
+  return useQuery({
+    queryKey: ['{{operationId}}'],
+    queryFn: async () => {
+      const response = await axios.get<{{responseType}}>(`{{{formattedPath}}}`);
+      return response.data;
+    },
+  });
+};
+  {{/if}}
+{{else}}
+  {{#if hasPathParams}}
+export const {{hookName}} = (params: {{paramInterfaceName}}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {{requestBodyType}}) => {
+      const response = await axios.{{method}}<{{responseType}}>(`{{{formattedPath}}}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate and refetch related queries
+      queryClient.invalidateQueries({ queryKey: ['{{operationId}}'] });
+    },
+  });
+};
+  {{else}}
+export const {{hookName}} = (data: {{requestBodyType}}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {{requestBodyType}}) => {
+      const response = await axios.{{method}}<{{responseType}}>(`{{{formattedPath}}}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate and refetch related queries
+      queryClient.invalidateQueries({ queryKey: ['{{operationId}}'] });
+    },
+  });
+};
+  {{/if}}
+{{/if}}

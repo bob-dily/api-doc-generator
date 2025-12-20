@@ -71,6 +71,14 @@ export interface Parameter {
 }
 export declare class SwaggerDocGenerator {
     /**
+     * Transforms a string to PascalCase
+     */
+    private toPascalCase;
+    /**
+     * Transforms a string to camelCase
+     */
+    private toCamelCase;
+    /**
      * Fetches the Swagger/OpenAPI JSON from a given URL
      */
     fetchSwaggerJSON(url: string): Promise<SwaggerDoc>;
@@ -87,11 +95,22 @@ export declare class SwaggerDocGenerator {
      */
     generateTypeDefinitions(swaggerDoc: SwaggerDoc): string;
     /**
+     * Generates React hooks from the paths in Swagger doc organized by tag
+     */
+    /**
+     * Converts OpenAPI types to TypeScript types
+     */
+    private convertTypeToTs;
+    /**
      * Generates a single TypeScript type definition
      */
     generateSingleTypeDefinition(typeName: string, schema: any, allSchemas: {
         [key: string]: any;
     }): string;
+    /**
+     * Generates an inline object interface for allOf composition
+     */
+    private generateInlineObjectInterface;
     /**
      * Generates React hooks from the paths in Swagger doc organized by tag
      */
@@ -166,4 +185,16 @@ export declare class SwaggerDocGenerator {
         hooks: string;
         types: string;
     }>, outputDir: string): void;
+    /**
+     * Generates frontend resources using Handlebars templates
+     */
+    generateHandlebarsResources(swaggerDoc: SwaggerDoc, templatePaths?: {
+        hooks?: string;
+        types?: string;
+        components?: string;
+        pages?: string;
+    }): Map<string, {
+        hooks: string;
+        types: string;
+    }>;
 }

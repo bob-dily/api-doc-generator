@@ -1,0 +1,14 @@
+// {{title}} API Hooks
+import { useQuery, useMutation, useQueryClient } from 'react-query';
+import axios from 'axios';
+{{#if hasImportTypes}}
+import type { {{#each usedTypeNames}}{{this}}{{#unless @last}}, {{/unless}}{{/each}} } from './{{camelCase tag}}.types';
+{{/if}}
+
+{{#each paramInterfaces}}
+{{{this}}}
+{{/each}}
+
+{{#each endpointHooks}}
+{{{this}}}
+{{/each}}
