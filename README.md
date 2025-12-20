@@ -1,180 +1,394 @@
-# jszy-swagger-doc-generator (api-sdk)
+# Swagger API SDK Generator
 
-A tool to generate frontend documentation, TypeScript types, and React Hooks from Swagger/OpenAPI JSON files.
-
-Available command aliases: `api-sdk`, `jszy-swagger-doc-generator`, `swagger-doc-generator`
+A powerful tool to generate TypeScript React SDK from OpenAPI/Swagger specifications using Handlebars templates. This tool creates organized hooks and types organized by API tags to provide a structured way to consume APIs in frontend applications.
 
 ## Features
 
-- Fetches Swagger JSON from a URL or loads from a local file
-- Generates comprehensive Markdown documentation
-- Generates TypeScript type definitions from schemas
-- Generates React Hooks for API endpoints, organized by tags
-- Supports both Swagger 2.0 and OpenAPI 3.x specifications
-- Handles API endpoints, parameters, request/response bodies, and responses
-- All generated content automatically placed in `./generated` directory to keep your project clean
-- Properly handles path and query parameters
-- Generates proper TypeScript interfaces and type aliases
-- Organizes generated code by API tags
+- ✨ **Handlebars-powered Templates**: Fully customizable using Handlebars template engine
+- 🏷️ **Tag-based Organization**: Generates separate files organized by OpenAPI tags
+- 🔗 **React Query Integration**: Creates ready-to-use React Query hooks with axios
+- 📝 **TypeSafe**: Generates TypeScript types from OpenAPI schemas
+- 🛠️ **Modular**: Clean separation between hooks and types per tag
+- 📦 **Tree-shakable**: Import only the hooks and types you need
+- 🎨 **Customizable**: Use your own Handlebars templates
+- 🚀 **Modern**: Built for React 18+ ecosystem
+
+## Prerequisites
+
+This tool is designed to work with projects that use:
+
+- **React** (v16.8+) - For React hooks functionality
+- **React Query** (React Query v3 or TanStack Query v4+) - For data fetching and caching
+- **Axios** - For HTTP requests
+- **TypeScript** - For type safety
+- **OpenAPI/Swagger** - Specification format for your API documentation
 
 ## Installation
 
-You can install this package globally to use it as a CLI tool:
+As a development dependency:
 
 ```bash
-npm install -g jszy-swagger-doc-generator
+npm install --save-dev jszy-swagger-doc-generator
+# or
+yarn add -D jszy-swagger-doc-generator
+# or
+pnpm add -D jszy-swagger-doc-generator
 ```
 
-Or you can use it without installing with npx:
+Or use without installing:
 
 ```bash
-npx jszy-swagger-doc-generator
+npx jszy-swagger-doc-generator [options]
 ```
 
-## Usage Examples
+You can also define script commands in your `package.json`:
 
-### Example 1: Generate docs from a local Swagger JSON file
+```json
+{
+  "scripts": {
+    "generate:auto": "api-sdk --url https://api.example.com/swagger.json",
+    "generate:sdk": "api-sdk --url https://api.example.com/swagger.json --generate-hooks --generate-types --hooks-output ./src/api --types-output ./src/types",
+    "generate:sdk:local": "api-sdk --input ./swagger.json --generate-hooks --generate-types --hooks-output ./src/api --types-output ./src/types",
+  }
+}
+```
 
-1. First, make sure you have a swagger.json file in your project
-2. Run the command using the primary alias:
+Then run:
 ```bash
-api-sdk --input ./swagger.json
+npm run generate:sdk
+# or
+npm run generate:sdk:local
+# or
+npm run generate:auto
 ```
-Alternatively, you can use the full package name:
+
+## Quick Start
+
+### 1. Generate SDK from API Documentation
+
+The simplest way is to use the auto-generate command that automatically creates all content from your API specification:
+
 ```bash
-npx jszy-swagger-doc-generator --input ./swagger.json
+# Auto-generate everything from a local OpenAPI JSON file
+npx jszy-swagger-doc-generator --input path/to/swagger.json
+
+# Or auto-generate everything from a URL
+npx jszy-swagger-doc-generator --url https://api.example.com/swagger.json
 ```
-3. Check the generated documentation in `./generated/docs/api-documentation.md`
 
-### Example 2: Generate from a live API endpoint
+This will automatically:
+- Generate TypeScript types for all schemas
+- Generate React Query hooks for all API endpoints
+- Organize everything by API tags in separate folders
+- Place generated content in `./generated/hooks` and `./generated/types`
 
-1. If your API is running and exposes Swagger JSON at `http://localhost:3000/api-docs-json`:
+### 2. Advanced Generation
+
+If you want more control, you can specify individual generation options:
+
 ```bash
-api-sdk --url http://localhost:3000/api-docs-json
-```
-2. All content will be generated in the `./generated` directory by default
+# Generate only hooks from a local OpenAPI JSON file
+npx jszy-swagger-doc-generator --input path/to/swagger.json --generate-hooks --hooks-output ./src/api/generated
 
-### Example 3: Generate TypeScript types and React hooks
+# Generate only types from a local OpenAPI JSON file
+npx jszy-swagger-doc-generator --input path/to/swagger.json --generate-types --types-output ./src/types/generated
 
-1. To generate TypeScript types and React hooks from your Swagger file:
-```bash
-api-sdk --input ./swagger.json --generate-types --generate-hooks
-```
-2. Generated files will be in:
-   - TypeScript types: `./generated/types/`
-   - React hooks: `./generated/hooks/`
-
-### Example 4: Generate everything from a URL
-
-1. Generate all documentation, types, and hooks from a live API:
-```bash
-api-sdk --url http://localhost:3000/api-docs-json --generate-types --generate-hooks
-```
-2. This will create all outputs in the `./generated` directory
-
-## CLI Options
-
-The tool provides multiple command aliases: `api-sdk`, `jszy-swagger-doc-generator`, and `swagger-doc-generator`.
-All commands support the same options:
-
-- `--url, -u`: URL to the Swagger JSON file
-- `--input, -i`: Path to the local Swagger JSON file
-- `--output, -o`: Output path for the generated documentation (default: ./generated/docs/api-documentation.md)
-- `--generate-types`: Generate TypeScript type definitions
-- `--generate-hooks`: Generate React hooks
-- `--types-output`: Output directory for TypeScript types (default: ./generated/types)
-- `--hooks-output`: Output directory for React hooks (default: ./generated/hooks)
-- `--help`: Show help information
-
-## Generated Output Structure
-
-By default, all generated content goes to the `./generated` directory:
-
-```
-generated/
-├── docs/
-│   └── api-documentation.md
-├── types/
-│   └── [generated TypeScript types]
-└── hooks/
-    ├── user/
-    ├── config/
-    └── [other tags as directories]/
+# Generate both hooks and types from a URL
+npx jszy-swagger-doc-generator --url https://api.example.com/swagger.json --generate-hooks --generate-types --hooks-output ./src/api/generated --types-output ./src/types/generated
 ```
 
-## Using Generated TypeScript Types
+### 2. Generated Structure
 
-Once generated, the TypeScript types can be imported in your project:
+The tool generates a clean structure organized by tags:
 
-```typescript
-import { User, UserConfig } from './generated/types/your-api-types';
+```
+src/api/generated/
+├── user/
+│   ├── user.hooks.ts
+│   └── user.types.ts
+├── product/
+│   ├── product.hooks.ts
+│   └── product.types.ts
+└── order/
+    ├── order.hooks.ts
+    └── order.types.ts
+```
 
-const user: User = {
-  id: 1,
-  name: 'John Doe',
-  email: 'john@example.com'
+### 3. Using Generated Hooks
+
+Import and use the generated hooks in your React components:
+
+```react
+import { useGetUsers, useCreateUser } from '@/api/generated/user/user.hooks';
+import { User, UserCreate } from '@/api/generated/user/user.types';
+
+const UserList: React.FC = () => {
+  const { data: users, isLoading, error } = useGetUsers({
+    page: 1,
+    limit: 10
+  });
+
+  const { mutate: createUser, isLoading: isCreating } = useCreateUser();
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {(error as Error).message}</div>;
+
+  return (
+    <div>
+      {users?.map(user => (
+        <div key={user.id}>{user.name}</div>
+      ))}
+
+      <button
+        onClick={() => createUser({ name: 'New User', email: 'new@example.com' })}
+        disabled={isCreating}
+      >
+        {isCreating ? 'Creating...' : 'Create User'}
+      </button>
+    </div>
+  );
 };
 ```
 
-## Using Generated React Hooks
+## Configuration Options
 
-The generated React hooks can be used in your React components:
+### CLI Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--url, -u <url>` | URL to the OpenAPI JSON file | - |
+| `--input, -i <path>` | Path to the local OpenAPI JSON file | - |
+| `--generate-hooks` | Generate React hooks | `false` |
+| `--generate-types` | Generate TypeScript types | `false` |
+| `--handlebars-templates` | Use Handlebars templates for generation | `false` |
+| `--hooks-output` | Output directory for hooks | `./generated/hooks` |
+| `--types-output` | Output directory for types | `./generated/types` |
+| `--help` | Show help information | - |
+
+### Supported OpenAPI Features
+
+The generator supports:
+- All OpenAPI 3.0/3.1 features
+- `allOf`, `anyOf`, `oneOf` compositions
+- Complex nested objects
+- Enums and unions
+- Array types
+- Parameter and response schemas
+- Tag-based organization
+- Operation IDs for hook names
+
+## Template Customization
+
+You can customize the generated code by modifying the Handlebars templates located in:
+- `templates/hooks/individual-hook.hbs` - Individual hook templates
+- `templates/hooks/react-hook.hbs` - Main hooks file template
+- `templates/types/type-definition.hbs` - Type definitions template
+
+Example hook template:
+```handlebars
+{{#if isGetRequest}}
+  {{#if hasParams}}
+export const {{hookName}} = (params: {{paramInterfaceName}}) => {
+  return useQuery({
+    queryKey: ['{{operationId}}', params],
+    queryFn: async () => {
+      const response = await axios.get<{{responseType}}>(`{{{formattedPath}}}`, { params });
+      return response.data;
+    },
+  });
+};
+  {{else}}
+export const {{hookName}} = () => {
+  return useQuery({
+    queryKey: ['{{operationId}}'],
+    queryFn: async () => {
+      const response = await axios.get<{{responseType}}>(`{{{formattedPath}}}`);
+      return response.data;
+    },
+  });
+};
+  {{/if}}
+{{else}}
+  {{#if hasPathParams}}
+export const {{hookName}} = (params: {{paramInterfaceName}}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {{requestBodyType}}) => {
+      const response = await axios.{{method}}<{{responseType}}>(`{{{formattedPath}}}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate and refetch related queries
+      queryClient.invalidateQueries({ queryKey: ['{{operationId}}'] });
+    },
+  });
+};
+  {{else}}
+export const {{hookName}} = (data: {{requestBodyType}}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: {{requestBodyType}}) => {
+      const response = await axios.{{method}}<{{responseType}}>(`{{{formattedPath}}}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      // Invalidate and refetch related queries
+      queryClient.invalidateQueries({ queryKey: ['{{operationId}}'] });
+    },
+  });
+};
+  {{/if}}
+{{/if}}
+```
+
+## Technology Stack Integration Guide
+
+### React + React Query + Axios Setup
+
+Make sure your project has these dependencies:
+
+```bash
+npm install react-query axios
+# For TanStack Query V4
+npm install @tanstack/react-query
+```
+
+Configure React Query in your app:
 
 ```typescript
-import { useUserController_queryUserInfo } from './generated/hooks/users/users.hooks';
+// App.tsx
+import { QueryClient, QueryClientProvider } from 'react-query'; // or @tanstack/react-query
 
-function MyComponent() {
-  const { userController_queryUserInfo } = useUserController_queryUserInfo();
-  
-  const fetchUser = async () => {
-    const user = await userController_queryUserInfo({ id: 1 });
-    console.log(user);
-  };
-  
-  return <button onClick={fetchUser}>Fetch User</button>;
+const queryClient = new QueryClient();
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {/* Your app components */}
+    </QueryClientProvider>
+  );
 }
 ```
 
-## Programmatic Usage
+### Working with Generated Types
 
-You can also use this package programmatically in your JavaScript/TypeScript code:
+The generated types are fully typed with JSDoc comments and support nested objects:
 
-```javascript
-const { SwaggerDocGenerator } = require('jszy-swagger-doc-generator');
-
-async function generate() {
-  const generator = new SwaggerDocGenerator();
-
-  // Load from URL
-  const swaggerDoc = await generator.fetchSwaggerJSON('https://api.example.com/swagger.json');
-
-  // Or load from file
-  // const swaggerDoc = generator.loadSwaggerFromFile('./swagger.json');
-
-  // Generate documentation
-  const documentation = generator.generateDocumentation(swaggerDoc);
-  generator.saveDocumentationToFile(documentation, './docs/api-documentation.md');
-
-  // Generate TypeScript types
-  const types = generator.generateTypeDefinitions(swaggerDoc);
-  generator.saveTypesToFile(types, './types/api-types.ts');
-
-  // Generate React hooks organized by tags
-  const hooksByTag = generator.generateReactHooks(swaggerDoc);
-  generator.saveHooksByTag(hooksByTag, './hooks');
+```typescript
+// user.types.ts
+export interface User {
+  /** 用户ID */
+  id: number;
+  /** 用户名 */
+  name: string;
+  /** 邮箱地址 */
+  email?: string | null;
+  profile?: null | UserProfile;
+  tags?: string[];
+  status?: UserStatus;
 }
 
-generate().catch(console.error);
+export type UserStatus = 'active' | 'inactive' | 'suspended';
 ```
 
-## Development
+### Advanced Usage
 
-To run this project locally:
+You can also programmatically generate the SDK using the API:
 
-1. Clone the repository
-2. Run `pnpm install` to install dependencies
-3. Run `pnpm run build` to compile TypeScript
-4. Run `pnpm run test` to run tests
+```typescript
+import { SwaggerDocGenerator } from 'jszy-swagger-doc-generator';
+
+const generator = new SwaggerDocGenerator();
+
+// From URL
+const swaggerDoc = await generator.fetchSwaggerJSON('https://api.example.com/swagger.json');
+
+// Or from local file
+const swaggerDoc = generator.loadSwaggerFromFile('./swagger.json');
+
+// Generate with Handlebars templates
+const hooksByTag = generator.generateHandlebarsResources(swaggerDoc, {
+  hooks: './templates/hooks/react-hook.hbs',
+  types: './templates/types/type-definition.hbs'
+});
+
+// Save to files
+generator.saveHooksByTag(hooksByTag, './src/api/generated');
+```
+
+## Best Practices
+
+### 1. Organize by API Tags
+Use meaningful tags in your OpenAPI specification to organize endpoints logically:
+```yaml
+paths:
+  /users/{id}:
+    get:
+      tags:
+        - User
+      # ...
+  /products/{id}:
+    get:
+      tags:
+        - Product
+      # ...
+```
+
+### 2. Leverage React Query Caching
+The generated hooks use React Query which provides automatic caching, deduplication, and cache invalidation:
+
+```typescript
+// Two components using the same hook will share cached data
+const UsersList = () => {
+  const { data } = useGetUsers(); // Cache key: ['getUsers']
+  return <>{/* ... */}</>;
+};
+
+const Stats = () => {
+  const { data } = useGetUsers(); // Same cache key: ['getUsers'] - shared data!
+  return <>{/* ... */}</>;
+};
+```
+
+### 3. Use TypeScript Strictly
+Leverage the generated types for complete type safety:
+
+```typescript
+// Fully typed parameters and return values
+const { mutate } = useUpdateUser();
+mutate({
+  id: 123,
+  name: 'John',
+  email: 'john@example.com'
+} as UserUpdate); // Ensures correct type
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Template not found errors**: Make sure template files exist at the expected paths
+2. **Missing types**: Ensure your OpenAPI spec defines all referenced schemas
+3. **Parameter mapping**: Check path parameter names match between URL and parameters
+
+### Error Handling
+
+The generated hooks follow React Query patterns for error handling:
+
+```typescript
+const { data, isLoading, error, isError } = useGetUsers();
+
+if (isLoading) return <Spinner />;
+if (isError) return <ErrorMessage error={error} />;
+
+return <UserList users={data} />;
+```
+
+## Contributing
+
+Feel free to submit issues or pull requests on the GitHub repository.
 
 ## License
 

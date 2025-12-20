@@ -66,6 +66,16 @@ const argv = yargs(hideBin(process.argv))
     if (argv.url && argv.input) {
       throw new Error('Only one of --url or --input can be provided');
     }
+
+    // Only set defaults if user hasn't explicitly specified either flag
+    // We'll use the fact that if user explicitly sets a flag, yargs will have it as not the default
+    // By default, both --generate-types and --generate-hooks are false
+    if (!argv.generateHooks && !argv.generateTypes) {
+      // Both are false (their default), so we'll generate both as a convenience
+      argv.generateHooks = true;
+      argv.generateTypes = true;
+    }
+
     return true;
   })
   .help()
