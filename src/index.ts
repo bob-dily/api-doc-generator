@@ -535,42 +535,44 @@ export class SwaggerDocGenerator {
 
       // Generate hooks content
       let hooksContent = `// ${toPascalCase(tag)} API Hooks\n`;
-      hooksContent += `import { useQuery, useMutation, useQueryClient } from 'react-query';\n`;
-      hooksContent += `import axios from 'axios';\n`;
 
-      // Determine which types are actually used in this tag's endpoints and generate imports
-      const usedTypeNames = new Set<string>();
+      // Generate hooks first to determine which types are actually used by hooks
+      const allHookContents: string[] = [];
+      const hookTypesUsed = new Set<string>(); // Track types used by hooks specifically
 
-      // First, find all types that are directly used in endpoints for this tag
-      if (schemas) {
-        for (const [typeName, schema] of Object.entries(schemas)) {
-          if (this.isSchemaUsedInEndpoints(typeName, endpoints, schemas)) {
-            usedTypeNames.add(typeName);
+      for (const { path, method, endpointInfo } of endpoints) {
+        // Determine response type for this specific endpoint
+        let responseType = 'any';
+        if (endpointInfo.responses) {
+          const successCodes = ['200', '201', '204', '202', '203', '205'];
+          for (const code of successCodes) {
+            if (endpointInfo.responses[code]) {
+              const responseSchema = endpointInfo.responses[code].content?.['application/json']?.schema;
+              if (responseSchema) {
+                responseType = this.convertTypeToTs(responseSchema, schemas);
+                this.extractTypeNamesFromType(responseType, hookTypesUsed, schemas);
+                break;
+              }
+            }
           }
         }
-      }
 
-      // Then, add all transitive dependencies of the directly used types
-      const finalTypeNames = new Set<string>();
-      for (const typeName of usedTypeNames) {
-        finalTypeNames.add(typeName);
-        // Find all types referenced by this type
-        const referencedTypes = this.findSchemaReferences(schemas[typeName], schemas);
-        for (const refName of referencedTypes) {
-          if (schemas[refName]) {
-            finalTypeNames.add(refName);
+        // Determine request body type for this specific endpoint
+        let requestBodyType = 'any';
+        if (method.toLowerCase() !== 'get' && method.toLowerCase() !== 'delete' && endpointInfo.requestBody) {
+          const bodySchema = endpointInfo.requestBody.content?.['application/json']?.schema;
+          if (bodySchema) {
+            requestBodyType = this.convertTypeToTs(bodySchema, schemas);
+            this.extractTypeNamesFromType(requestBodyType, hookTypesUsed, schemas);
           }
         }
+
+        // Generate the hook content
+        const hookContent = this.generateReactQueryHook(path, method, endpointInfo, schemas);
+        allHookContents.push(hookContent);
       }
 
-      // Add import statement only if there are types to import
-      if (finalTypeNames.size > 0) {
-        hooksContent += `import type { ${Array.from(finalTypeNames).join(', ')} } from './${toCamelCase(tag)}.types';\n\n`;
-      } else {
-        hooksContent += `\n`;
-      }
-
-      // Generate parameter interfaces for this tag
+      // Generate parameter interfaces for this tag (need this before content analysis)
       const allParamInterfaces: string[] = [];
       endpoints.forEach(({ path, method, endpointInfo }) => {
         const paramInterface = this.generateParamInterface(path, method, endpointInfo, schemas);
@@ -579,16 +581,105 @@ export class SwaggerDocGenerator {
         }
       });
 
-      // Add all unique parameter interfaces
-      allParamInterfaces.forEach(interfaceCode => {
-        hooksContent += interfaceCode + '\n';
+      // Extract type names from parameter interfaces and add to hookTypesUsed
+      for (const interfaceCode of allParamInterfaces) {
+        // Extract the parameter interface name from the export interface line
+        const interfaceNameMatch = interfaceCode.match(/export interface (\w+)/);
+        if (interfaceNameMatch && interfaceNameMatch[1]) {
+          // Add the parameter interface name to the types that will be generated
+          hookTypesUsed.add(interfaceNameMatch[1]);
+        }
+
+        // Also extract any custom type references within the interface
+        const propertyMatches = interfaceCode.match(/[a-zA-Z_$][a-zA-Z0-9_$]*\??\s*:\s*[^;]+/g);
+        if (propertyMatches) {
+          for (const property of propertyMatches) {
+            // Extract the type part (after the colon)
+            const colonIndex = property.indexOf(':');
+            if (colonIndex !== -1) {
+              let typePart = property.substring(colonIndex + 1).trim();
+              // Remove trailing semicolon if present
+              if (typePart.endsWith(';')) {
+                typePart = typePart.slice(0, -1).trim();
+              }
+              // Extract type names from this type string
+              this.extractTypeNamesFromType(typePart, hookTypesUsed, schemas);
+            }
+          }
+        }
+      }
+
+      // Add parameter interfaces to types content as well
+      let typesContentWithParamInterfaces = typesContent;
+      for (const interfaceCode of allParamInterfaces) {
+        typesContentWithParamInterfaces += interfaceCode + '\n';
+      }
+
+      // Add the generated hooks to hooksContent first
+      let fullHooksContent = hooksContent; // Start with the header
+      fullHooksContent += `import { useQuery, useMutation, useQueryClient } from 'react-query';\n`;
+      fullHooksContent += `import axios from 'axios';\n`;
+
+      // Add type import statement with all potentially used types first
+      if (hookTypesUsed.size > 0) {
+        fullHooksContent += `import type { ${Array.from(hookTypesUsed).join(', ')} } from './${toCamelCase(tag)}.types';\n\n`;
+      } else {
+        fullHooksContent += `\n`;
+      }
+
+      // Add all hook contents to full content for analysis (parameter interfaces are not part of this for analysis)
+      allHookContents.forEach(hookCode => {
+        fullHooksContent += hookCode + '\n';
       });
 
-      // Generate individual hooks using react-query and axios
-      endpoints.forEach(({ path, method, endpointInfo }) => {
-        const hookContent = this.generateReactQueryHook(path, method, endpointInfo, schemas);
-        hooksContent += hookContent + '\n';
+      // Now analyze the complete generated content to determine which imports are actually used
+      // Analyze react-query functions usage
+      const usedReactQueryFunctions = new Set<string>();
+      if (fullHooksContent.includes('useQuery(')) {
+        usedReactQueryFunctions.add('useQuery');
+      }
+      if (fullHooksContent.includes('useMutation(')) {
+        usedReactQueryFunctions.add('useMutation');
+      }
+      if (fullHooksContent.includes('useQueryClient()') || fullHooksContent.includes('queryClient.')) {
+        usedReactQueryFunctions.add('useQueryClient');
+      }
+
+      // Analyze type imports usage by checking if each type name appears in the content
+      const usedTypes = new Set<string>();
+      for (const type of hookTypesUsed) {
+        // Check if the type name appears in the content (not as part of another type name)
+        // Use word boundary matching to avoid partial matches
+        const regex = new RegExp(`\\b${type}\\b`, 'g');
+        if (regex.test(fullHooksContent)) {
+          usedTypes.add(type);
+        }
+      }
+
+      // Rebuild hooks content with only the actually used imports
+      hooksContent = `// ${toPascalCase(tag)} API Hooks\n`;
+
+      // Add react-query import statement with only the functions that are actually used
+      const reactQueryImports = Array.from(usedReactQueryFunctions).sort();
+      if (reactQueryImports.length > 0) {
+        hooksContent += `import { ${reactQueryImports.join(', ')} } from 'react-query';\n`;
+      }
+      hooksContent += `import axios from 'axios';\n`;
+
+      // Add type import statement only if there are types to import
+      if (usedTypes.size > 0) {
+        hooksContent += `import type { ${Array.from(usedTypes).join(', ')} } from './${toCamelCase(tag)}.types';\n\n`;
+      } else {
+        hooksContent += `\n`;
+      }
+
+      // Add all hook contents (parameter interfaces are now in the types file)
+      allHookContents.forEach(hookCode => {
+        hooksContent += hookCode + '\n';
       });
+
+      // Update the types content to include parameter interfaces
+      typesContent = typesContentWithParamInterfaces;
 
       hooksByTag.set(tag, { hooks: hooksContent, types: typesContent });
     });
@@ -776,6 +867,72 @@ export class SwaggerDocGenerator {
     }
 
     return references;
+  }
+
+  /**
+   * Extract type names from a TypeScript type string
+   */
+  private extractTypeNamesFromType(typeStr: string, typeSet: Set<string>, allSchemas: { [key: string]: any }): void {
+    if (!typeStr) return;
+
+    // Remove spaces to make pattern matching easier
+    let cleanType = typeStr.replace(/\s+/g, '');
+
+    // Handle union types (A|B|C) - split and process each part
+    if (cleanType.includes('|')) {
+      const parts = cleanType.split('|');
+      parts.forEach(part => this.extractTypeNamesFromType(part.trim(), typeSet, allSchemas));
+      return;
+    }
+
+    // Handle array types (Type[] or Array<Type>)
+    if (cleanType.endsWith('[]')) {
+      const arrayType = cleanType.slice(0, -2);
+      this.extractTypeNamesFromType(arrayType, typeSet, allSchemas);
+      return;
+    }
+
+    if (cleanType.startsWith('Array<')) {
+      const startIndex = 'Array<'.length;
+      const endIndex = cleanType.lastIndexOf('>');
+      if (endIndex > startIndex) {
+        const arrayType = cleanType.substring(startIndex, endIndex);
+        this.extractTypeNamesFromType(arrayType, typeSet, allSchemas);
+      }
+      return;
+    }
+
+    // Handle intersection types (A&B)
+    if (cleanType.includes('&')) {
+      const parts = cleanType.split('&');
+      parts.forEach(part => this.extractTypeNamesFromType(part.trim(), typeSet, allSchemas));
+      return;
+    }
+
+    // Handle generic types like Promise<Type>
+    if (cleanType.includes('<') && cleanType.includes('>')) {
+      const bracketIndex = cleanType.indexOf('<');
+      const genericType = cleanType.substring(0, bracketIndex);
+      // Add the generic type if it exists in schemas
+      if (allSchemas[genericType]) {
+        typeSet.add(genericType);
+      }
+      // Extract and process the type argument
+      const contentStart = bracketIndex + 1;
+      const contentEnd = cleanType.lastIndexOf('>');
+      if (contentEnd > contentStart) {
+        const typeArg = cleanType.substring(contentStart, contentEnd);
+        this.extractTypeNamesFromType(typeArg, typeSet, allSchemas);
+      }
+      return;
+    }
+
+    // Check if this is a simple type name that exists in schemas
+    if (allSchemas[typeStr.trim()]) {
+      typeSet.add(typeStr.trim());
+    } else if (allSchemas[cleanType]) {
+      typeSet.add(cleanType);
+    }
   }
 
   /**

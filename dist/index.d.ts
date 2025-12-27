@@ -147,6 +147,10 @@ export declare class SwaggerDocGenerator {
         [key: string]: any;
     }): Set<string>;
     /**
+     * Extract type names from a TypeScript type string
+     */
+    private extractTypeNamesFromType;
+    /**
      * Generates a parameter interface for an API endpoint
      */
     generateParamInterface(path: string, method: string, endpointInfo: any, schemas: {
